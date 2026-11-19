@@ -1,0 +1,249 @@
+import cv2
+import mediapipe as mp
+import numpy as np
+import time
+
+# -----------------------------
+# AI AIR DRAWING PROJECT
+# -----------------------------
+
+# Webcam setup
+cap = cv2.VideoCapture(0)
+cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+
+if not cap.isOpened():
+    print("Error: Webcam not detected!")
+    exit()
+
+# MediaPipe hand detection
+mp_hands = mp.solutions.hands
+mp_draw = mp.solutions.drawing_utils
+
+hands = mp_hands.Hands(
+    max_num_hands=1,
+    model_complexity=0,
+    min_detection_confidence=0.6,
+    min_tracking_confidence=0.6
+)
+
+# Drawing canvas
+canvas = None
+previous_point = None
+smooth_point = None
+
+# Drawing settings
+colors = {
+    "BLUE": (255, 0, 0),
+    "GREEN": (0, 255, 0),
+    "RED": (0, 0, 255),
+    "YELLOW": (0, 255, 255),
+    "PURPLE": (255, 0, 255),
+    "WHITE": (255, 255, 255)
+}
+
+color_name = "BLUE"
+draw_color = colors[color_name]
+brush_size = 8
+eraser = False
+
+# -----------------------------
+# TOOLBAR
+# -----------------------------
+
+def draw_toolbar(frame):
+    cv2.rectangle(frame, (0, 0), (frame.shape[1], 75),
+                  (35, 35, 35), -1)
+
+    cv2.putText(frame, "AI AIR DRAWING",
+                (15, 28), cv2.FONT_HERSHEY_SIMPLEX,
+                0.8, (255, 255, 255), 2)
+
+    cv2.putText(frame,
+                "1:Blue  2:Green  3:Red  4:Yellow  5:Purple  6:White",
+                (15, 55), cv2.FONT_HERSHEY_SIMPLEX,
+                0.48, (255, 255, 255), 1)
+
+    cv2.putText(frame,
+                "E:Eraser  C:Clear  S:Save  +/-:Brush  Q:Quit",
+                (650, 55), cv2.FONT_HERSHEY_SIMPLEX,
+                0.48, (255, 255, 255), 1)
+
+# -----------------------------
+# MAIN PROGRAM
+# -----------------------------
+
+while True:
+
+    success, frame = cap.read()
+
+    if not success:
+        print("Camera frame not received!")
+        break
+
+    # Mirror camera
+    frame = cv2.flip(frame, 1)
+
+    height, width, _ = frame.shape
+
+    if canvas is None:
+        canvas = np.zeros((height, width, 3), dtype=np.uint8)
+
+    # Convert image to RGB
+    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+    # Detect hands
+    results = hands.process(rgb)
+
+    current_point = None
+
+    if results.multi_hand_landmarks:
+
+        for hand_landmarks in results.multi_hand_landmarks:
+
+            # Index fingertip landmark
+            index_tip = hand_landmarks.landmark[8]
+
+            x = int(index_tip.x * width)
+            y = int(index_tip.y * height)
+
+            # Keep coordinates inside the frame
+            x = max(0, min(x, width - 1))
+            y = max(0, min(y, height - 1))
+
+            current_point = (x, y)
+
+            # Smooth finger movement
+            if smooth_point is None:
+                smooth_point = np.array([x, y], dtype=float)
+            else:
+                smooth_point = (
+                    0.7 * smooth_point +
+                    0.3 * np.array([x, y], dtype=float)
+                )
+
+            current_point = (
+                int(smooth_point[0]),
+                int(smooth_point[1])
+            )
+
+            # Show fingertip cursor
+            cv2.circle(
+                frame,
+                current_point,
+                12,
+                (0, 255, 255),
+                -1
+            )
+
+            # Draw continuously while hand is detected
+            if previous_point is not None:
+
+                cv2.line(
+                    canvas,
+                    previous_point,
+                    current_point,
+                    draw_color,
+                    brush_size,
+                    cv2.LINE_AA
+                )
+
+            previous_point = current_point
+
+            # Draw hand landmarks
+            mp_draw.draw_landmarks(
+                frame,
+                hand_landmarks,
+                mp_hands.HAND_CONNECTIONS
+            )
+
+    else:
+        # Stop drawing when hand disappears
+        previous_point = None
+        smooth_point = None
+
+    # Combine webcam and drawing canvas
+    output = cv2.addWeighted(frame, 0.5, canvas, 0.5, 0)
+
+    # Draw toolbar
+    draw_toolbar(output)
+
+    # Display active colour
+    cv2.putText(
+        output,
+        "Colour: " + ("ERASER" if eraser else color_name),
+        (15, height - 25),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 255),
+        2
+    )
+
+    cv2.imshow("AI Air Drawing Project", output)
+
+    # -----------------------------
+    # KEYBOARD CONTROLS
+    # -----------------------------
+
+    key = cv2.waitKey(1) & 0xFF
+
+    if key == ord('q'):
+        break
+
+    elif key == ord('1'):
+        color_name = "BLUE"
+        eraser = False
+        draw_color = colors[color_name]
+
+    elif key == ord('2'):
+        color_name = "GREEN"
+        eraser = False
+        draw_color = colors[color_name]
+
+    elif key == ord('3'):
+        color_name = "RED"
+        eraser = False
+        draw_color = colors[color_name]
+
+    elif key == ord('4'):
+        color_name = "YELLOW"
+        eraser = False
+        draw_color = colors[color_name]
+
+    elif key == ord('5'):
+        color_name = "PURPLE"
+        eraser = False
+        draw_color = colors[color_name]
+
+    elif key == ord('6'):
+        color_name = "WHITE"
+        eraser = False
+        draw_color = colors[color_name]
+
+    elif key == ord('e'):
+        eraser = True
+        draw_color = (0, 0, 0)
+
+    elif key == ord('c'):
+        canvas[:] = 0
+
+    elif key == ord('s'):
+        filename = "air_drawing_" + str(int(time.time())) + ".png"
+        cv2.imwrite(filename, canvas)
+        print("Drawing saved:", filename)
+
+    elif key == ord('+') or key == ord('='):
+        brush_size = min(brush_size + 2, 40)
+
+    elif key == ord('-'):
+        brush_size = max(brush_size - 2, 2)
+
+# -----------------------------
+# RELEASE RESOURCES
+# -----------------------------
+
+cap.release()
+hands.close()
+cv2.destroyAllWindows()
+
+print("AI Air Drawing closed successfully!")
